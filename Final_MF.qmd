@@ -1,0 +1,542 @@
+---
+title: "final_mf_code"
+author: "Allyson Placko"
+format: html
+editor: visual
+embed-resources: true
+---
+
+## Analysis of Galapagos Microfilaria data
+
+Graphs and models used to generate results in Microfilaria paper, not all figures are in the paper, but all part of the process and conclusions drawn.
+
+```{r,message = FALSE, warning = FALSE}
+#load in needed packages 
+library(dplyr)
+library(readr)
+library(ggplot2)
+library(tidyr)
+library(ggrepel)
+library(lubridate)
+library(lme4)
+library(lmerTest)
+library(emmeans)
+library(multcompView)
+library(sjPlot)
+```
+
+```{r}
+#bring in data sheet and climate data
+climate <- read.csv("climate_puerto-ayora (1).csv")
+MF <- read.csv("Full_data_AP_try2.csv")
+
+# data cleaning 
+MF <- MF %>%
+  mutate(
+    date = as.Date(date.x, format = "%d-%b-%y"),  # Convert date column
+    YearMonth = format(date, "%Y-%m"),
+    Month = month(date, label = TRUE),
+    Year = year(date)
+  )
+
+climate$observation_date <- mdy(climate$observation_date)
+
+# Extract month and year from the observation_date
+climate <- climate %>%
+  mutate(Month = format(observation_date, "%Y-%m"))
+MF <- MF %>% filter(!Species %in% c("MAG", "MELA", "MYI", "OLI", "PAL"))#excluding species with no microscopy prevlence & no PCR samples, important to note that these all have very low numbers so we do not conclude that MF doesn't infect these species, we just dont have enough samples to conclude either way
+
+#ordering species in figures based on phylogeny 
+MF$Species <- factor(MF$Species,
+                            levels = c("CRA", "FOR", "FUL", "SCA", "PAR", "GAMO"))
+
+species_labels <- c(
+  CRA  = expression(italic('P. crassirostris')),
+  FOR  = expression(italic('G. fortis')),
+  FUL  = expression(italic('G. fuliginosa')),
+  GAMO = expression(italic('M. parvulus')),
+  PAR  = expression(italic('C. parvulus')),
+  SCA  = expression(italic('G. scandens'))
+)
+
+cbPalette <- c(
+  "CRA" = "#648FFF",
+  "FOR" = "#785EF0",
+  "FUL" = "#DC267F",
+  "SCA" = "#FE6100",
+  "GAMO" = "#FFB000"
+)
+
+#entire study season 
+all_months <- c("2023-02", "2023-03", "2023-04", "2023-05", "2023-06", "2023-07", "2023-08", "2023-09", "2023-10", "2023-11", "2023-12", "2024-01", "2024-02", "2024-03")
+
+```
+
+## Rain Graphs
+
+making 2 different rain graphs, 1 for microscopy and one for the rain of the entire season, only the total rain graph appears in paper
+
+```{r}
+#Microscopy
+mic_clim <- climate %>%  filter(Month >= "2023-02" & Month <= "2023-09")
+ggplot(mic_clim, aes(x = Month, y = precipitation)) +
+  geom_bar(stat = "summary", fun = "sum", fill = "blue", color = "black") +
+  labs(
+    title = "Total Rainfall per Month at CDRS",
+    x = "Month",
+    y = "Total Rainfall (mm)"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1) 
+  )
+```
+
+```{r}
+#Entire data set
+climate <- climate %>%
+  mutate(Season = factor(case_when(
+    Month %in% c("2023-01", "2023-02", "2023-03", "2023-04", "2023-05") ~ "2023 Wet Season",
+    Month %in% c("2023-06", "2023-07", "2023-08", "2023-09", "2023-10", "2023-11", "2023-12") ~ "2023 Dry Season",
+    Month %in% c("2024-01", "2024-02", "2024-03") ~ "2024 Wet Season",
+    TRUE ~ "Other"
+  ), levels = c("2023 Wet Season", "2023 Dry Season", "2024 Wet Season")))  # Set order
+
+# Plot with seasonal binning
+ggplot(climate, aes(x = Month, y = precipitation, fill = Season)) +
+  geom_bar(stat = "summary", fun = "sum", color = "black") +
+  scale_fill_manual(values = c("2023 Wet Season" = "blue", 
+                               "2023 Dry Season" = "brown",
+                               "2024 Wet Season" = "darkblue")) +
+  labs(
+    title = "Total Rainfall per Month at CDRS",
+    x = "Month",
+    y = "Total rainfall (mm)",
+    fill = "Season"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",         
+    legend.box = "horizontal"
+  )
+```
+
+## Prevalence by Month
+
+looking at how prevalence of microfilaria infection in the population changes from month to month.
+
+```{r}
+# MIC -------------------------------------------------------
+mini_prev_data_MIC <- MF %>%
+  filter(Microscopy == "mic") %>%
+  group_by(YearMonth, MF) %>%
+  summarize(count = n(), .groups = "drop") 
+
+# Ensure all months are present, even if there are no observations
+mini_prev_data_MIC <- mini_prev_data_MIC %>%
+  complete(YearMonth = factor(all_months, levels = all_months), MF) %>%
+  replace_na(list(count = 0))  # Replace missing counts with 0
+
+ggplot(mini_prev_data_MIC, aes(x = YearMonth, y = count, fill = MF)) +
+  geom_bar(stat = "identity", position = "stack") +  
+  scale_fill_manual(values = c("neg" = "gray", "pos" = "red"), labels = c("Uninfected", "Infected")) +  # Custom colors
+  labs(
+    title = "Positives and Negatives by Month: Microscopy",
+    x = "Month",
+    y = "Count",
+    fill = "Microfilaria Status"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+
+# PCR ---------------------------------------------------------
+mini_prev_data_PCR <- MF %>%
+  filter(PCR == "PCR") %>%
+  group_by(YearMonth, MF) %>%
+  summarize(count = n(), .groups = "drop") 
+
+# Ensure all months are present, even if there are no observations
+mini_prev_data_PCR <- mini_prev_data_PCR %>%
+  complete(YearMonth = factor(all_months, levels = all_months), MF) %>%
+  replace_na(list(count = 0))  # Replace missing counts with 0
+
+ggplot(mini_prev_data_PCR, aes(x = YearMonth, y = count, fill = MF)) +
+  geom_bar(stat = "identity", position = "stack") +  # Stacked bars
+  scale_fill_manual(values = c("neg" = "gray", "pos" = "red"), labels = c("Uninfected", "Infected")) +  # Custom colors
+  labs(
+    title = "Positives and Negatives by Month: PCR",
+    x = "Month",
+    y = "Count",
+    fill = "Microfilaria Status"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+
+# Combined -------------------------------------------------------
+mini_prev_date <- MF %>%
+  group_by(YearMonth, MF) %>%
+  summarize(count = n(), .groups = "drop") 
+
+# Ensure all months are present, even if there are no observations
+mini_prev_date <- mini_prev_date %>%
+  complete(YearMonth = factor(all_months, levels = all_months), MF) %>%
+  replace_na(list(count = 0))  # Replace missing counts with 0
+
+ggplot(mini_prev_date, aes(x = YearMonth, y = count, fill = MF)) +
+  geom_bar(stat = "identity", position = "stack") +  # Stacked bars
+  scale_fill_manual(values = c("neg" = "gray", "pos" = "red"), labels = c("Uninfected", "Infected")) +  # Custom colors
+  labs(
+    title = "Positives and Negatives by Month: All Data",
+    x = "Month",
+    y = "Count",
+    fill = "Microfilaria Status"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  )
+
+```
+
+## Climate models
+
+Does total monthly rainfall predict monthly prevalence rate?
+
+```{r}
+#make tables for models
+monthly_precip <- climate %>%
+  group_by(Month) %>%
+  summarise(total_precip = sum(precipitation, na.rm = TRUE))
+
+MF_table <- MF %>%
+  filter(Microscopy == "mic") %>%
+  group_by(YearMonth, MF) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = MF, values_from = count, values_fill = 0)
+
+MF_table_all <- MF %>%
+  group_by(YearMonth, MF) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = MF, values_from = count, values_fill = 0)
+
+
+MF_table_PCR <- MF %>%
+  filter(PCR == "PCR") %>%
+  group_by(YearMonth, MF) %>%
+  summarise(count = n(), .groups = "drop") %>%
+  tidyr::pivot_wider(names_from = MF, values_from = count, values_fill = 0)
+
+#merging climate data with prev
+MF_CLIM <- left_join(MF_table, monthly_precip, by = c("YearMonth" = "Month"))
+MF_CLIM_all <- left_join(MF_table_all, monthly_precip, by = c("YearMonth" = "Month"))
+MF_CLIM_PCR <- left_join(MF_table_PCR, monthly_precip, by = c("YearMonth" = "Month"))
+
+#models
+mod <- glm(cbind(pos, neg) ~ total_precip, family = binomial, data = MF_CLIM)
+summary(mod)
+confint(mod)
+
+mod2 <- glm(cbind(pos, neg) ~ total_precip, family = binomial, data = MF_CLIM_all)
+summary(mod2)
+confint(mod2)
+
+mod3 <- glm(cbind(pos, neg) ~ total_precip, family = binomial, data = MF_CLIM_PCR)
+summary(mod3)
+confint(mod3)
+```
+
+## Prevlence Across Species
+
+```{r}
+#Starting with PCR
+MF_PCR_filter <- MF %>% filter(PCR == "PCR") # includes all birds that were evalutated by PCR, so includes the birds that were evaluated by both methods
+
+MF_PCR_filter$MF <- ifelse(MF_PCR_filter$MF == "pos", 1, 0) #converting for modeling purposes
+
+mod5 <- glm(MF ~ Species,
+            family = binomial,
+            data = MF_PCR_filter)
+summary(mod5)
+#emmeans stuff--------------------------------------------
+emmeansresults1 <- emmeans(mod5, ~ Species)
+pairwise_results1 <- contrast(emmeansresults1, method = "pairwise")
+summary(pairwise_results1, adjust = "tukey")
+
+emmeans_print1 <- multcomp::cld(emmeansresults1, Letters=letters)
+emmeans_df1 <- as.data.frame(emmeans_print1)
+emmeans_df1 <- emmeans_df1[, c("Species", ".group", "asymp.LCL", "asymp.UCL")]
+merged_data1 <- merge(MF_PCR_filter, emmeans_df1, by = "Species")
+#Code that makes the graph work---------------------------------
+
+merged_data1$MF <- factor(merged_data1$MF, levels = c(0, 1), labels = c("Uninfected", "Infected"))
+
+bar_heights1 <- merged_data1 %>%
+  group_by(Species) %>%
+  summarise(y_pos = sum(table(MF)))
+
+label_data1 <- emmeans_df1 %>%
+  select(Species, .group) %>%
+  distinct(Species, .group) %>%
+  left_join(bar_heights1, by = "Species")
+
+#graph :)---------------------------------------------
+
+ggplot(merged_data1, aes(x = Species, fill = MF)) +
+  geom_bar(position = "stack") +
+  scale_x_discrete(labels = species_labels) +
+  scale_fill_manual(
+    values = c("Uninfected" = "gray", "Infected" = "red")) +
+  labs(x = "Species", y = "Count", fill = "Microfilaria Status") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  ) +
+  geom_text(data = label_data1, aes(x = Species, y = y_pos + 2, label = .group),
+            vjust = 0, size = 5, fontface = "bold", inherit.aes = FALSE) +
+  coord_cartesian(ylim = c(0, 40))  
+
+```
+
+```{r}
+#Rinse and repeat with other 2 data sets, MIC here---------------
+
+MF_filter_MIC <- MF %>% filter(Microscopy == "mic")
+MF_filter_MIC$MF <- ifelse(MF_filter_MIC$MF == "pos", 1, 0)
+mod6 <- glm(MF ~ Species,
+            family = binomial,
+            data = MF_filter_MIC)
+summary(mod6)
+
+emmeansresults2 <- emmeans(mod6, ~ Species)
+emmeans_print2 <- multcomp::cld(emmeansresults2, Letters=letters)
+pairwise_results2 <- contrast(emmeansresults2, method = "pairwise")
+summary(pairwise_results2, adjust = "tukey")
+emmeans_df2 <- as.data.frame(emmeans_print2)
+emmeans_df2 <- emmeans_df2[, c("Species", ".group", "asymp.LCL", "asymp.UCL")]
+merged_data_MIC <- merge(MF_filter_MIC, emmeans_df2, by = "Species")
+# Convert MF to a factor with appropriate labels
+merged_data_MIC$MF <- factor(merged_data_MIC$MF, levels = c(0, 1), labels = c("Uninfected", "Infected"))
+
+# Compute total heights of stacked bars per species
+bar_heights2 <- merged_data_MIC %>%
+  group_by(Species) %>%
+  summarise(y_pos = sum(table(MF)))  # Summing total bar height
+
+# Ensure one significance label per species
+label_data2 <- emmeans_df2 %>%
+  select(Species, .group) %>%
+  distinct(Species, .group) %>%
+  left_join(bar_heights2, by = "Species")  # Add y positions
+
+# Plot
+ggplot(merged_data_MIC, aes(x = Species, fill = MF)) +
+  geom_bar(position = "stack") +  # Ensure stacking
+  scale_x_discrete(labels = species_labels) +
+  scale_fill_manual(
+    values = c("Uninfected" = "gray", "Infected" = "red"))+
+  labs(x = "Species", y = "Count", fill = "Microfilaria Status") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  ) +
+  # Add emmeans letters above the stacked bars
+ geom_text(data = label_data2, aes(x = Species, y = y_pos + 2, label = .group),
+            vjust = 0, size = 5, fontface = "bold", inherit.aes = FALSE) +
+  coord_cartesian(ylim = c(0, 50)) 
+```
+
+```{r}
+#combined----------------------------------------------------
+MF_species <- MF
+MF_species$MF <- ifelse(MF_species$MF == "pos", 1, 0)
+mod7 <- glm(MF ~ Species,
+            family = binomial,
+            data = MF_species)
+summary(mod7)
+
+emmeansresults <- emmeans(mod7, ~ Species)
+emmeans_print <- multcomp::cld(emmeansresults, Letters=letters)
+pairwise_results <- contrast(emmeansresults, method = "pairwise")
+summary(pairwise_results, adjust = "tukey")
+emmeans_df <- as.data.frame(emmeans_print)
+emmeans_df <- emmeans_df[, c("Species", ".group", "asymp.LCL", "asymp.UCL")]
+merged_data_com <- merge(MF_species, emmeans_df, by = "Species")
+# Convert MF to a factor with appropriate labels
+merged_data_com$MF <- factor(merged_data_com$MF, levels = c(0, 1), labels = c("Uninfected", "Infected"))
+
+# Compute total heights of stacked bars per species
+bar_heights <- merged_data_com %>%
+  group_by(Species) %>%
+  summarise(y_pos = sum(table(MF)))  # Summing total bar height
+
+# Ensure one significance label per species
+label_data <- emmeans_df %>%
+  select(Species, .group) %>%
+  distinct(Species, .group) %>%
+  left_join(bar_heights, by = "Species")  # Add y positions
+
+# Plot
+ggplot(merged_data_com, aes(x = Species, fill = MF)) +
+  geom_bar(position = "stack") +  # Ensure stacking
+  scale_x_discrete(labels = species_labels) +
+  scale_fill_manual(
+    values = c("Uninfected" = "gray", "Infected" = "red"))+
+  labs(x = "Species", y = "Count", fill = "Microfilaria Status") +
+  theme_minimal(base_size = 14) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    legend.position = "bottom",
+    legend.box = "horizontal"
+  ) +
+  # Add emmeans letters above the stacked bars
+  geom_text(data = label_data, aes(x = Species, y = y_pos + 2, label = .group),
+            vjust = 0, size = 5, fontface = "bold", inherit.aes = FALSE) +
+  coord_cartesian(ylim = c(0, 75)) 
+```
+
+## White Blood Cell Counts
+
+```{r}
+Mic_fil<- MF %>% filter(Microscopy == "mic") %>% filter(!Species %in% c("MAG", "MELA", "MYI", "OLI", "PAL", "PAR")) #species with no microfilaria infection from microscopy 
+
+wbc_labels <- c(
+  "lymphocyte_scaled" = "Lymphocytes",
+  "monocytes_scaled" = "Monocytes",
+  "eosinophil_scaled" = "Eosinophils",
+  "basophil_scaled" = "Basophils",
+  "heterophil_scaled" = "Heterophils",
+  "thrombocyte_scaled" = "Thrombocytes",
+  "total_leukocyte_scaled" = "Total Leukocytes",
+  "H.L" = "Heterophil/Lymphocyte ratio"
+)
+# Scale white blood cell counts by erythrocyte count
+Mic_fil <- Mic_fil %>%
+  mutate(
+    basophil_scaled = basophil / (total_erythrocytes/1000),
+    eosinophil_scaled = eosinophil / (total_erythrocytes/1000),
+    heterophil_scaled = heterophil / (total_erythrocytes/1000),
+    lymphocyte_scaled = lymphocyte / (total_erythrocytes/1000),
+    monocytes_scaled = monocyte / (total_erythrocytes/1000),
+    thrombocyte_scaled = thrombocyte / (total_erythrocytes/1000),
+    total_leukocyte_scaled = total_leukocyte / (total_erythrocytes/1000)
+  )
+Mic_fil <- Mic_fil %>%
+  mutate(H.L = heterophil_scaled/lymphocyte_scaled)
+
+long_data <- pivot_longer(Mic_fil, 
+                          cols = c(heterophil_scaled, lymphocyte_scaled, eosinophil_scaled, thrombocyte_scaled, monocytes_scaled, basophil_scaled, H.L),
+                          names_to = "WBC_Type",
+                          values_to = "Count")
+
+ggplot(long_data, aes(x = MF, y = Count)) +
+  geom_violin(alpha = 0.6) +
+  geom_jitter(aes(color = Species), width = 0.2, alpha = 0.8) +
+  facet_wrap(~ WBC_Type, ncol=4, scales = "free_y", labeller = as_labeller(wbc_labels)) +
+  scale_color_manual(values = cbPalette, labels = species_labels) +
+  scale_x_discrete(labels = c("pos" = "Infected", "neg" = "Uninfected")) + # Change x-axis labels
+  labs(
+    title = "White Blood Cell Counts by Parasite Detection",
+    x = "Parasite Detection",
+    y = "Count",
+    fill = "Parasite Detection",
+    color = "Species"
+  ) +
+  theme_minimal(base_size = 14) +
+  theme(
+    panel.border = element_rect(color = "black", fill = NA, linewidth = 1),
+    strip.background = element_rect(fill = "gray90", color = "black"),
+    strip.text = element_text(face = "bold"),
+    legend.title = element_text(face = "bold")
+  )
+```
+
+## WBC Models
+
+```{r}
+wbc_vars <- c("lymphocyte_scaled", "monocytes_scaled","eosinophil_scaled",
+  "basophil_scaled", "heterophil_scaled", "thrombocyte_scaled", "total_leukocyte_scaled", "H.L")
+
+# Fit models for each WBC type
+Mic_fil$MF <- ifelse(Mic_fil$MF == "pos", 1, 0)
+models <- lapply(wbc_vars, function(wbc) {
+  formula <- as.formula(paste(wbc, "~ MF + use_sex + Species")) 
+  lm(formula, data = Mic_fil)  # Logistic regression 
+})
+
+# Name models for reference
+names(models) <- wbc_vars
+
+# View summary of a specific model
+summary(models[["lymphocyte_scaled"]])
+summary(models[["monocytes_scaled"]])
+summary(models[["eosinophil_scaled"]])
+summary(models[["basophil_scaled"]])
+summary(models[["heterophil_scaled"]])
+summary(models[["thrombocyte_scaled"]])
+summary(models[["H.L"]])
+
+#now we p-adjust
+ps <- c(0.961, 0.913, 0.237, 0.202, 0.0635, 0.0251, 0.341)
+p.adjust(ps, method = "holm")
+#nothing is significant sad
+```
+
+## Body condition
+
+```{r}
+species_labels_bc <- c(
+  "CRA" = "italic('P. crassirostris')",
+  "FOR" = "italic('G. fortis')",
+  "FUL" = "italic('G. fuliginosa')",
+  "GAMO" = "italic('M. parvulus')",
+  "PAR" = "italic('C. parvulus')",
+  "SCA" = "italic('G. scandens')"
+)
+
+data_filtered <- MF %>% #removing significant outliers, mainly SMC125 who has bc of 212 due to oddly small tarus (20 while most other gamos have tarsus of around 30), believe this value is a mistake 
+  group_by(Species) %>%
+  mutate(Q1 = quantile(Body_condition, 0.25, na.rm = TRUE),
+         Q3 = quantile(Body_condition, 0.75, na.rm = TRUE),
+         IQR = Q3 - Q1) %>%
+  filter(Body_condition > (Q1 - 1.5 * IQR) & Body_condition < (Q3 + 1.5 * IQR)) %>%
+  ungroup()
+data_filtered$Species <- factor(data_filtered$Species,
+                            levels = c("CRA", "FOR", "FUL", "SCA", "PAR", "GAMO"))
+
+ggplot(data_filtered, aes(x = MF, y = Body_condition)) +
+  geom_boxplot() +
+  facet_wrap(~ Species, scales = "free_y", labeller = as_labeller(species_labels_bc, default = label_parsed))  +
+  scale_x_discrete(labels = c("pos" = "Infected", "neg" = "Uninfected")) +
+  labs(x = "Microfilaria Infection Status", y = "Body Condition", title = "Body Condition vs. Microfilarial Infection Status by Species") +
+  theme_bw(base_size = 14)
+```
+
+## Body Condition Models
+
+```{r}
+MF$MF <- ifelse(MF$MF == "pos", 1, 0)
+#is MF predicted by body condition
+mod_bc <- glmer(MF ~ Body_condition + use_sex + (1 | Species), 
+                family = binomial, data = MF)
+summary(mod_bc)
+
+#now lets try the opposite and arguably more relenvent q is bc predicted by mf
+
+mod_MF.BC <- lmer(Body_condition ~ MF + use_sex + (1 | Species), data = MF)
+summary(mod_MF.BC)
+```

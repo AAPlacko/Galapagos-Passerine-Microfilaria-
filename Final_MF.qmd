@@ -100,7 +100,7 @@ climate <- climate %>%
     Month %in% c("2023-06", "2023-07", "2023-08", "2023-09", "2023-10", "2023-11", "2023-12") ~ "2023 Dry Season",
     Month %in% c("2024-01", "2024-02", "2024-03") ~ "2024 Wet Season",
     TRUE ~ "Other"
-  ), levels = c("2023 Wet Season", "2023 Dry Season", "2024 Wet Season")))  # Set order
+  ), levels = c("2023 Wet Season", "2023 Dry Season", "2024 Wet Season"))) 
 
 # Plot with seasonal binning
 ggplot(climate, aes(x = Month, y = precipitation, fill = Season)) +
@@ -136,7 +136,7 @@ mini_prev_data_MIC <- MF %>%
 # Ensure all months are present, even if there are no observations
 mini_prev_data_MIC <- mini_prev_data_MIC %>%
   complete(YearMonth = factor(all_months, levels = all_months), MF) %>%
-  replace_na(list(count = 0))  # Replace missing counts with 0
+  replace_na(list(count = 0))  
 
 ggplot(mini_prev_data_MIC, aes(x = YearMonth, y = count, fill = MF)) +
   geom_bar(stat = "identity", position = "stack") +  
@@ -163,7 +163,7 @@ mini_prev_data_PCR <- MF %>%
 # Ensure all months are present, even if there are no observations
 mini_prev_data_PCR <- mini_prev_data_PCR %>%
   complete(YearMonth = factor(all_months, levels = all_months), MF) %>%
-  replace_na(list(count = 0))  # Replace missing counts with 0
+  replace_na(list(count = 0))  
 
 ggplot(mini_prev_data_PCR, aes(x = YearMonth, y = count, fill = MF)) +
   geom_bar(stat = "identity", position = "stack") +  # Stacked bars
@@ -189,11 +189,11 @@ mini_prev_date <- MF %>%
 # Ensure all months are present, even if there are no observations
 mini_prev_date <- mini_prev_date %>%
   complete(YearMonth = factor(all_months, levels = all_months), MF) %>%
-  replace_na(list(count = 0))  # Replace missing counts with 0
+  replace_na(list(count = 0)) 
 
 ggplot(mini_prev_date, aes(x = YearMonth, y = count, fill = MF)) +
-  geom_bar(stat = "identity", position = "stack") +  # Stacked bars
-  scale_fill_manual(values = c("neg" = "gray", "pos" = "red"), labels = c("Uninfected", "Infected")) +  # Custom colors
+  geom_bar(stat = "identity", position = "stack") + 
+  scale_fill_manual(values = c("neg" = "gray", "pos" = "red"), labels = c("Uninfected", "Infected")) +  
   labs(
     title = "Positives and Negatives by Month: All Data",
     x = "Month",
@@ -256,7 +256,7 @@ summary(mod3)
 confint(mod3)
 ```
 
-## Prevlence Across Species
+## Prevalence Across Species
 
 ```{r}
 #Starting with PCR
@@ -333,13 +333,13 @@ merged_data_MIC$MF <- factor(merged_data_MIC$MF, levels = c(0, 1), labels = c("U
 # Compute total heights of stacked bars per species
 bar_heights2 <- merged_data_MIC %>%
   group_by(Species) %>%
-  summarise(y_pos = sum(table(MF)))  # Summing total bar height
+  summarise(y_pos = sum(table(MF)))  
 
 # Ensure one significance label per species
 label_data2 <- emmeans_df2 %>%
   select(Species, .group) %>%
   distinct(Species, .group) %>%
-  left_join(bar_heights2, by = "Species")  # Add y positions
+  left_join(bar_heights2, by = "Species")  
 
 # Plot
 ggplot(merged_data_MIC, aes(x = Species, fill = MF)) +
@@ -382,17 +382,17 @@ merged_data_com$MF <- factor(merged_data_com$MF, levels = c(0, 1), labels = c("U
 # Compute total heights of stacked bars per species
 bar_heights <- merged_data_com %>%
   group_by(Species) %>%
-  summarise(y_pos = sum(table(MF)))  # Summing total bar height
+  summarise(y_pos = sum(table(MF))) 
 
 # Ensure one significance label per species
 label_data <- emmeans_df %>%
   select(Species, .group) %>%
   distinct(Species, .group) %>%
-  left_join(bar_heights, by = "Species")  # Add y positions
+  left_join(bar_heights, by = "Species") 
 
 # Plot
 ggplot(merged_data_com, aes(x = Species, fill = MF)) +
-  geom_bar(position = "stack") +  # Ensure stacking
+  geom_bar(position = "stack") +  
   scale_x_discrete(labels = species_labels) +
   scale_fill_manual(
     values = c("Uninfected" = "gray", "Infected" = "red"))+
@@ -475,7 +475,7 @@ wbc_vars <- c("lymphocyte_scaled", "monocytes_scaled","eosinophil_scaled",
 Mic_fil$MF <- ifelse(Mic_fil$MF == "pos", 1, 0)
 models <- lapply(wbc_vars, function(wbc) {
   formula <- as.formula(paste(wbc, "~ MF + use_sex + Species")) 
-  lm(formula, data = Mic_fil)  # Logistic regression 
+  lm(formula, data = Mic_fil)  
 })
 
 # Name models for reference
@@ -530,13 +530,7 @@ ggplot(data_filtered, aes(x = MF, y = Body_condition)) +
 
 ```{r}
 MF$MF <- ifelse(MF$MF == "pos", 1, 0)
-#is MF predicted by body condition
-mod_bc <- glmer(MF ~ Body_condition + use_sex + (1 | Species), 
-                family = binomial, data = MF)
-summary(mod_bc)
-
-#now lets try the opposite and arguably more relenvent q is bc predicted by mf
-
+#is body condition predicted by microfilaria infection status?
 mod_MF.BC <- lmer(Body_condition ~ MF + use_sex + (1 | Species), data = MF)
 summary(mod_MF.BC)
 ```
